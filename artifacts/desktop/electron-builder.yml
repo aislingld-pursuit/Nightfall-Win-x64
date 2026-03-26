@@ -1,0 +1,28 @@
+appId: com.nuclearforce.desktop
+productName: Nuclear Force
+
+directories:
+  output: release
+  buildResources: build-resources
+
+files:
+  - dist/main.js
+  - dist/preload.js
+  - package.json
+
+extraResources:
+  - from: ../nuclear-escape/dist/public
+    to: public
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: portable
+      arch: x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true

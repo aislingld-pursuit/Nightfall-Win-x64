@@ -1,0 +1,22 @@
+{
+  "name": "@workspace/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node ./build.mjs",
+    "dev": "pnpm run build && electron .",
+    "package": "pnpm run build && electron-builder --config electron-builder.yml",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "catalog:",
+    "cors": "^2",
+    "electron": "^36.0.0",
+    "electron-builder": "^25.0.0",
+    "esbuild": "^0.27.3",
+    "express": "^5"
+  }
+}
