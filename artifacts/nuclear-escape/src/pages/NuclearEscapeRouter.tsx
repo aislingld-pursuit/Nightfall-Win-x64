@@ -185,32 +185,86 @@ function offsetLatLng(origin: LatLng, distanceM: number, bearingDeg: number): La
   return { lat: (lat2 * 180) / Math.PI, lng: (lng2 * 180) / Math.PI };
 }
 
-function geocodeAddress(raw: string): LatLng | null {
+async function geocodeAddress(raw: string): Promise<LatLng | null> {
   const q = raw.toLowerCase().trim();
+
+  // 1. Preset lookup — instant, works fully offline
   for (const [key, coords] of Object.entries(PRESET_ADDRESSES)) {
     if (q.includes(key)) return coords;
   }
-  const zipMatch = q.match(/\b1(0|1)\d{3}\b/);
-  if (zipMatch) {
-    const seed = parseInt(zipMatch[0]) % 100;
-    return { lat: 40.65 + (seed / 100) * 0.35, lng: -74.05 + (seed / 100) * 0.3 };
+
+  // 2. Nominatim (OpenStreetMap) — free, no API key, same data as map tiles
+  try {
+    const encoded = encodeURIComponent(raw + ", New York, NY, USA");
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1&countrycodes=us`,
+      {
+        headers: { "User-Agent": "NuclearEscapeRouter/1.0 (educational simulation)" },
+        signal: AbortSignal.timeout(5000),
+      }
+    );
+    if (res.ok) {
+      const data = await res.json() as Array<{ lat: string; lon: string }>;
+      if (data.length > 0) {
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      }
+    }
+  } catch {
+    // offline or timed out — fall through to null
   }
-  if (q.match(/\d+/) && (q.includes("ny") || q.includes("new york") || q.includes("ave") || q.includes("st") || q.includes("blvd") || q.includes("rd"))) {
-    const num = parseInt(q.match(/\d+/)?.[0] ?? "100");
-    return { lat: 40.71 + ((num % 60) / 60) * 0.12, lng: -74.02 + ((num % 40) / 40) * 0.08 };
-  }
+
   return null;
 }
 
-function getDummyWeather(): WeatherData {
-  const conditions = ["clear sky", "partly cloudy", "overcast clouds", "light breeze", "scattered clouds"];
-  return {
-    windSpeed: 3 + Math.random() * 8,
-    windDeg: Math.floor(Math.random() * 360),
-    description: conditions[Math.floor(Math.random() * conditions.length)],
-    temp: 10 + Math.floor(Math.random() * 18),
-    humidity: 40 + Math.floor(Math.random() * 40),
-  };
+// ─── Weather — cache + API + offline default ─────────────────────────────────
+
+const WEATHER_CACHE_KEY = "nuclear-escape-weather";
+const WEATHER_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// NYC prevailing westerly wind used when fully offline with no cache
+const DEFAULT_WEATHER: WeatherData = {
+  windSpeed: 5.5,
+  windDeg: 270,
+  description: "offline – default westerly wind",
+  temp: 12,
+  humidity: 60,
+};
+
+async function fetchWeather(lat: number, lon: number): Promise<WeatherData> {
+  // 1. Fresh cache (< 7 days)
+  try {
+    const raw = localStorage.getItem(WEATHER_CACHE_KEY);
+    if (raw) {
+      const { data, ts } = JSON.parse(raw) as { data: WeatherData; ts: number };
+      if (Date.now() - ts < WEATHER_CACHE_TTL_MS) return data;
+    }
+  } catch { /* storage unavailable */ }
+
+  // 2. Live API call (needs backend reachable)
+  try {
+    const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const data = await res.json() as WeatherData;
+      try {
+        localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+      } catch { /* storage full */ }
+      return data;
+    }
+  } catch { /* offline or backend unreachable */ }
+
+  // 3. Stale cache (any age) — better than random
+  try {
+    const raw = localStorage.getItem(WEATHER_CACHE_KEY);
+    if (raw) {
+      const { data } = JSON.parse(raw) as { data: WeatherData; ts: number };
+      return { ...data, description: data.description + " (cached)" };
+    }
+  } catch { /* storage unavailable */ }
+
+  // 4. Hard fallback
+  return DEFAULT_WEATHER;
 }
 
 function getDummyEscape(origin: LatLng, dest: LatLng): EscapeInfo {
@@ -334,12 +388,12 @@ export default function NuclearEscapeRouter() {
   }, []);
 
   // ── Core analysis function (shared by search, geo, click) ───────────────────
-  const analyze = useCallback((userCoords: LatLng, blastCoords: LatLng, label: string, yieldType: YieldOption) => {
+  const analyze = useCallback(async (userCoords: LatLng, blastCoords: LatLng, label: string, yieldType: YieldOption) => {
     const map = mapInstanceRef.current;
     if (!map) return;
     clearLayers();
 
-    const weather = getDummyWeather();
+    const weather = await fetchWeather(blastCoords.lat, blastCoords.lng);
     const zones = YIELD_CONFIGS[yieldType].zones;
     const maxRadius = zones[zones.length - 1].radius;
     const distFromBlast = haversineDistance(userCoords, blastCoords);
@@ -508,18 +562,17 @@ export default function NuclearEscapeRouter() {
 
     setLoading(true);
     setError("");
-    await new Promise((r) => setTimeout(r, 700));
 
-    const coords = geocodeAddress(address);
+    const coords = await geocodeAddress(address);
     if (!coords) {
-      setError("Address not found. Try: 'Times Square', 'Brooklyn Bridge', '10001', or a NYC neighborhood name.");
+      setError("Address not found. Try a NYC landmark ('Times Square'), neighborhood ('Brooklyn'), or street address with NY/New York.");
       setLoading(false);
       return;
     }
 
     // Default blast center = midtown (Times Square) if none placed
     const blast = blastCenter ?? { lat: 40.758, lng: -73.9855 };
-    analyze(coords, blast, address, selectedYield);
+    await analyze(coords, blast, address, selectedYield);
   }, [address, blastCenter, selectedYield, analyze]);
 
   // ── Geolocation ─────────────────────────────────────────────────────────────
@@ -531,11 +584,11 @@ export default function NuclearEscapeRouter() {
     setGeoLoading(true);
     setError("");
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const userCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         const blast = blastCenter ?? { lat: 40.758, lng: -73.9855 };
         setAddress("My Location");
-        analyze(userCoords, blast, "My Location (GPS)", selectedYield);
+        await analyze(userCoords, blast, "My Location (GPS)", selectedYield);
       },
       (err) => {
         setGeoLoading(false);
@@ -557,7 +610,7 @@ export default function NuclearEscapeRouter() {
 
     if (clickMode) {
       map.getContainer().style.cursor = "crosshair";
-      const handler = (e: L.LeafletMouseEvent) => {
+      const handler = async (e: L.LeafletMouseEvent) => {
         const clicked = { lat: e.latlng.lat, lng: e.latlng.lng };
         setBlastCenter(clicked);
         setClickMode(false);
@@ -565,7 +618,7 @@ export default function NuclearEscapeRouter() {
 
         // If we already have a result, re-analyze with new blast center
         if (result) {
-          analyze(result.userLocation, clicked, result.address, selectedYield);
+          await analyze(result.userLocation, clicked, result.address, selectedYield);
         } else {
           // Just show a temporary blast marker
           clearLayers();

@@ -6,10 +6,11 @@ const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY;
 const OPENWEATHER_KEY = process.env.OPENWEATHER_API_KEY;
 
 router.get("/weather", async (req, res) => {
-  const { lat, lon } = req.query as { lat: string; lon: string };
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
 
-  if (!lat || !lon) {
-    res.status(400).json({ error: "lat and lon are required" });
+  if (isNaN(lat) || isNaN(lon)) {
+    res.status(400).json({ error: "lat and lon must be valid numbers" });
     return;
   }
 
@@ -50,48 +51,41 @@ router.get("/weather", async (req, res) => {
 });
 
 router.get("/geocode", async (req, res) => {
-  const { address } = req.query as { address: string };
+  const address = (req.query.address as string | undefined)?.trim();
 
   if (!address) {
     res.status(400).json({ error: "address is required" });
     return;
   }
 
-  if (!GOOGLE_MAPS_KEY) {
-    res.status(500).json({ error: "Google Maps API key not configured" });
-    return;
-  }
-
   try {
-    const encoded = encodeURIComponent(address);
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encoded}&key=${GOOGLE_MAPS_KEY}`;
-    const response = await fetch(url);
-    const data = (await response.json()) as {
-      status: string;
-      results?: Array<{
-        geometry?: { location?: { lat?: number; lng?: number } };
-        formatted_address?: string;
-      }>;
-    };
+    const encoded = encodeURIComponent(address + ", New York, NY, USA");
+    const url = `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1&countrycodes=us`;
+    const response = await fetch(url, {
+      headers: { "User-Agent": "NuclearEscapeRouter/1.0 (educational simulation)" },
+    });
 
-    if (data.status === "ZERO_RESULTS" || !data.results || data.results.length === 0) {
+    if (!response.ok) {
+      req.log.error({ status: response.status }, "Nominatim geocoding error");
+      res.status(500).json({ error: "Geocoding service unavailable" });
+      return;
+    }
+
+    const data = (await response.json()) as Array<{
+      lat: string;
+      lon: string;
+      display_name: string;
+    }>;
+
+    if (!data || data.length === 0) {
       res.status(404).json({ error: "Address not found" });
       return;
     }
 
-    if (data.status !== "OK") {
-      req.log.error({ status: data.status }, "Geocode API error");
-      res.status(500).json({ error: "Geocoding failed" });
-      return;
-    }
-
-    const result = data.results[0];
-    const location = result.geometry?.location;
-
     res.json({
-      lat: location?.lat ?? 0,
-      lng: location?.lng ?? 0,
-      formattedAddress: result.formatted_address ?? address,
+      lat: parseFloat(data[0].lat),
+      lng: parseFloat(data[0].lon),
+      formattedAddress: data[0].display_name,
     });
   } catch (err) {
     req.log.error({ err }, "Geocode fetch failed");
