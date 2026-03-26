@@ -1,0 +1,153 @@
+PRODUCT REQUIREMENTS DOCUMENT
+Nuclear Force: The Golden Hour Router
+
+Version: 1.0 MVP
+Build Window: 2-Hour Hackathon
+Status: Deploy-Ready
+Author: L & Team
+Date: March 2026
+
+================================================================================
+
+01 — PRODUCT ONE-LINER
+
+A real-time, GPS-powered survival router that turns nuclear panic into a 3-second
+tactical plan — identifying the nearest high-shielding shelter, drawing a visual
+escape route, and visualizing blast/fallout threat radius on a single map.
+
+================================================================================
+
+02 — PROBLEM & SOLUTION
+
+THE PROBLEM
+Existing maps are built for normalcy. In a nuclear event, the internet floods with
+misinformation and people don't know a safe building from a death trap. Every second
+of searching = radiation exposure.
+
+THE SOLUTION
+Default-to-Shelter logic: the moment you open the app, it already knows the nearest
+high-shielding structure, the walking time, and the depth you need to reach. No
+searching required.
+
+================================================================================
+
+03 — CORE FEATURES (MVP SCOPE)
+
+The app is organized into 3 tabs: Find Shelter | Threat Analysis | Evacuate
+
+TAB 1 — FIND SHELTER
+
+  - Survival Directive Card [P0] — Hero card on load: nearest high-shielding location
+    (subway, reinforced garage, hospital basement), walking time, required depth.
+    Auto-triggers on GPS lock.
+
+  - Visual Escape Route [P0] — Blue lifeline polyline from user GPS to nearest shelter
+    on Leaflet map. 4 shelter types: Subway, Hospital, Parking Garage, Basement.
+    Tappable markers with shielding factor label.
+
+TAB 2 — THREAT ANALYSIS
+
+  - Blast Radius + Fallout Plume [P0] — Client-side geometric analysis: concentric
+    danger-zone circles (fireball / heavy blast / light blast / fallout), and a
+    directional fallout cone driven by prevailing wind vector. No server calls needed.
+
+TAB 3 — EVACUATE
+
+  - Vehicle Evacuation Route [P1] — For users outside the immediate blast zone: a
+    drive-out route drawn perpendicular to the fallout plume direction, routing away
+    from downwind corridors. Straight vector line as hackathon fallback.
+
+================================================================================
+
+04 — IN / OUT OF SCOPE
+
+Feature                          Status    Reason
+-------------------------------- --------- --------------------------------------
+GPS-based shelter routing        IN        Core mechanic
+Client-side blast/fallout calc   IN        No server = works offline
+3-tab UI (Shelter/Threat/        IN        Core navigation
+  Evacuate)
+Static shelter dataset           IN        Hardcoded GeoJSON for hackathon
+  (NYC/demo city)
+Real-time radiation sensor API   OUT       No API in 2 hrs
+Live wind data integration       OUT       Default wind vector only
+User accounts / auth             OUT       Not needed for MVP
+Turn-by-turn navigation          OUT       Route line is sufficient
+
+================================================================================
+
+05 — TECH STACK
+
+Layer               Technology
+------------------- -----------------------------------------------------------
+Framework           TypeScript + Vite
+Map Rendering       Leaflet.js
+Map Tiles           Mapbox or OpenStreetMap
+Geometry Engine     Turf.js (fully client-side)
+Shelter Data        Static GeoJSON (hardcoded)
+Deployment          Vercel (1-click, auto-deploy on push)
+
+================================================================================
+
+06 — 2-HOUR BUILD TIMELINE
+
+Time          Milestone               Deliverable
+------------- ----------------------- ------------------------------------------
+0:00 – 0:25   Scaffold + Map Boot     Vite project, Leaflet map, GPS permission,
+                                      user marker. Deploy skeleton to Vercel
+                                      immediately.
+
+0:25 – 0:55   Shelter Data + Routing  Load GeoJSON, nearest-point logic with
+                                      Turf.js, draw blue route polyline, hero
+                                      card component.
+
+0:55 – 1:25   Blast + Fallout Engine  Concentric radius circles (turf.circle),
+                                      fallout cone polygon with wind bearing,
+                                      color-coded zones.
+
+1:25 – 1:45   3-Tab UI + Evacuate     Tab navigation, threat analysis view,
+                                      perpendicular evac route vector, polish
+                                      hero card copy.
+
+1:45 – 2:00   Deploy + Pitch Prep     Final Vercel push, confirm live URL, QR
+                                      code for demo phones, rehearse 30-second
+                                      pitch.
+
+================================================================================
+
+07 — DEPLOY CHECKLIST
+
+  - npm create vite@latest  →  TypeScript template
+  - npm i leaflet turf @types/leaflet  →  Core deps only
+  - vercel --yes  →  Link repo, auto-detect Vite config
+  - Add MAPBOX_TOKEN to Vercel env vars dashboard
+  - git push origin main  →  Auto-deploys on every push
+  - vercel --prod  →  Final live URL for demo day
+
+================================================================================
+
+08 — SUCCESS CRITERIA (DEMO DAY)
+
+Must work:
+  - App loads on mobile browser over HTTPS
+  - GPS fires and map auto-centers on user location
+  - Nearest shelter hero card appears in under 3 seconds
+  - Blue route line is clearly visible on map
+  - Blast radius circles render on Threat tab
+
+Pitch hook:
+  - Open app live on stage. Show hero card auto-appear.
+  - Switch to Threat tab — blast circles deliver the visual shock.
+  - Hand phone to a judge. Let them interact. Done.
+
+================================================================================
+
+09 — 30-SECOND PITCH SCRIPT
+
+"Most people won't die from the blast. They'll die because they don't know which
+way the wind is blowing. Nuclear Force is a hyper-local survival router — open it,
+and in under three seconds you have the nearest safe basement, your walking time,
+and a blue line to follow. No accounts, no searching, no server. Just a plan. We
+built it in two hours. It might save your life."
+
+================================================================================

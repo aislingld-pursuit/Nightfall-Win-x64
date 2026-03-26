@@ -1,0 +1,662 @@
+﻿TECHNICAL DESIGN DOCUMENT — v3 (As-Built)
+Nuclear Force: The Golden Hour Router
+Version: 3.0 (updated to match live build)     Status: Deployed on Replit
+Stack: TypeScript + Leaflet + Turf.js + OpenStreetMap + Replit     Author: L & Team     March 2026
+This document reflects the actual built product as seen in screenshots. It supersedes v1/v2 specs. Sections that differed from the original TDD are marked [UPDATED].
+
+
+1. System Overview
+Nuclear Force is a fully client-side, single-page web app. There is no backend. All blast geometry, fallout calculations, and shelter routing run in the browser using Turf.js. Deployed on Replit. No server-side processing required.
+
+
+1.1 Core User Flow (3 steps)
+1. User clicks 'Place Blast' and taps the map to set the detonation epicenter.
+2. User enters their address in the search field, or clicks GPS to auto-locate.
+3. User hits 'Analyze' — blast zones render, nearest shelter appears in the right panel, walking directions populate.
+
+
+1.2 Updated Data Flow [UPDATED]
+
+
+User taps 'Place Blast' → map click → epicenterLat/Lng stored
+     ↓
+User enters address OR clicks GPS button → userLat/Lng resolved
+     ↓
+User clicks 'Analyze'
+     ↓
+Turf.js circle() × 3–4 yield-scaled radii → Leaflet overlay layers
+     ↓
+Turf.js destination() × windBearing → fallout plume polygon
+     ↓
+Turf.js nearestPoint(user, shelterFC) → nearest shelter feature
+     ↓
+Right sidebar panel updates:
+  Tab 1 (Find Shelter): shelter card + distance + walk time + depth
+  Tab 2 (Threat): blast zone legend already visible on map
+  Tab 3 (Evacuate): crosswind route rendered on map
+     ↓
+Walking directions list renders (7 numbered steps) below shelter card
+
+
+
+
+2. Project Structure [UPDATED]
+
+
+nuclear-force/
+├── index.html
+├── package.json
+├── src/
+│   ├── main.ts               # App entry, event wiring
+│   ├── map.ts                # Leaflet init, OSM tile layer
+│   ├── gps.ts                # GPS acquisition + address geocoding
+│   ├── blast.ts              # Yield selector + Place Blast mode
+│   ├── shelters.ts           # GeoJSON loader + nearest-point
+│   ├── routing.ts            # Shelter card, walk route polyline
+│   ├── directions.ts         # Walking directions list (7 steps)
+│   ├── threat.ts             # Blast radius + fallout plume engine
+│   ├── evacuate.ts           # Crosswind evac route
+│   ├── sidebar.ts            # Right panel tab switcher
+│   ├── ui.ts                 # Navbar, legend, how-to card
+│   └── data/
+│       └── shelters.geojson  # NYC shelter dataset
+└── styles/
+    └── main.css
+
+
+
+
+3. Data Models [UPDATED]
+3.1 Shelter Feature (GeoJSON)
+
+
+// src/data/shelters.geojson
+// Shelter types: subway | hospital | parking | building
+{
+  "type": "FeatureCollection",
+  "features": [{
+    "type": "Feature",
+    "geometry": { "type": "Point", "coordinates": [-73.9934, 40.7506] },
+    "properties": {
+      "id": "shelter_001",
+      "name": "Court Sq-23 St Station",
+      "address": "23rd St & Jackson Ave, Queens",
+      "type": "subway",
+      "depthLevels": 3,          // levels underground (displayed as "3 lvls UG")
+      "capacityApprox": 2000,
+      "shieldingFactor": 0.9
+    }
+  }]
+}
+
+
+
+
+3.2 TypeScript Interfaces [UPDATED]
+
+
+export type ShelterType = 'subway' | 'hospital' | 'parking' | 'building';
+
+
+export interface ShelterProperties {
+  id: string;
+  name: string;
+  address: string;
+  type: ShelterType;
+  depthLevels: number;        // floors underground
+  capacityApprox: number;
+  shieldingFactor: number;    // 0.0 – 1.0
+}
+
+
+export interface UserPosition {
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  label?: string;             // human-readable address string
+}
+
+
+export type YieldPreset = 'dirty-bomb' | '10kt' | '100kt' | '1mt';
+
+
+export interface BlastConfig {
+  epicenterLat: number;
+  epicenterLng: number;
+  yieldPreset: YieldPreset;
+  windBearing: number;        // degrees 0-360, default 225 (SW)
+}
+
+
+// Blast radii (km) per yield preset
+export const BLAST_RADII: Record<YieldPreset, {
+  fireball: number; heavyBlast: number; lightBlast: number
+}> = {
+  'dirty-bomb': { fireball: 0.05, heavyBlast: 0.2,  lightBlast: 0.5  },
+  '10kt':        { fireball: 0.5,  heavyBlast: 1.5,  lightBlast: 4.0  },
+  '100kt':       { fireball: 1.5,  heavyBlast: 4.0,  lightBlast: 10.0 },
+  '1mt':         { fireball: 5.0,  heavyBlast: 12.0, lightBlast: 25.0 },
+};
+
+
+
+
+4. UI Layout Specification [UPDATED — reflects actual build]
+The app uses a desktop-primary single-page layout: full-screen map with a fixed top navbar and a right-side panel that opens after Analyze is clicked. Mobile is supported via responsive CSS. This differs from the original bottom-tab-bar mobile-first spec.
+
+
+4.1 Top Navbar
+Fixed, full-width. Dark background (#1a1a2e or similar). Contains all primary controls.
+Element
+	Type
+	Behavior
+	App logo + subtitle
+	Static text
+	'Nuclear Escape Router' / 'NYC Emergency Preparedness'
+	Yield selector
+	Button group (4 options)
+	Dirty Bomb | 10 Kiloton (default, highlighted) | 100 Kiloton | 1 Megaton. Updates BLAST_RADII used on next Analyze call.
+	Address input
+	Text input
+	Free-text address entry. Shows 'Your location: [address]' when resolved. Geocodes via Nominatim (OSM, free).
+	GPS button
+	Icon button (blue)
+	Calls navigator.geolocation. Populates address field with 'My Location'.
+	Place Blast button
+	Action button (red)
+	Toggles map into blast-placement mode. Next map click sets epicenterLat/Lng. Banner confirms: 'Blast center set'.
+	Analyze button
+	Primary CTA (orange/red)
+	Triggers full analysis: blast zones + fallout + shelter lookup + sidebar panel open.
+	
+
+4.2 Map Area
+Leaflet map fills remaining viewport (below navbar, left of sidebar). OpenStreetMap tiles. Standard light theme — not dark Mapbox.
+Layer
+	Trigger
+	Style
+	OSM base tiles
+	Always
+	Standard OpenStreetMap light theme
+	User location dot
+	GPS resolved or address geocoded
+	Blue filled circle marker
+	Blast epicenter marker
+	Place Blast → map click
+	Red circle with white center dot
+	Fireball zone
+	Analyze clicked
+	Red filled circle, low opacity
+	Heavy blast zone
+	Analyze clicked
+	Orange filled circle, low opacity
+	Light blast zone
+	Analyze clicked
+	Yellow filled circle, low opacity
+	Fallout drift plume
+	Analyze clicked
+	Purple dashed polygon, low opacity
+	Escape route (cyan)
+	Analyze clicked
+	Solid cyan polyline, user → safe zone
+	Walk to shelter (dashed)
+	Analyze clicked
+	Dashed blue polyline, user → nearest shelter
+	Shelter markers
+	Analyze clicked
+	Labeled pins by type: Subway/Hospital/Parking/Building
+	
+
+4.3 Right Sidebar Panel [UPDATED — key difference from original spec]
+The sidebar is NOT a bottom tab bar. It is a fixed right-side panel (~300px wide) that opens when Analyze is clicked. It contains a 3-tab interface at the top and scrollable content below.
+
+
+Sidebar header
+* Yellow alert banner: 'FIND SHELTER OR EVACUATE'
+* Sub-text: distance from blast + action directive (e.g. 'You are 4.3km from blast. Shelter underground or evacuate now.')
+
+
+Tab 1 — Find Shelter (default active)
+* Nearest Shelter card:
+   * Shelter name (bold, large)
+   * Address line
+   * 3 stat chips: Distance (meters) | Walk Time (min) | Depth (levels UG)
+   * Capacity line: '~2,000 people'
+* Walking Directions list (numbered, 7 steps):
+   * Head west on the nearest street
+   * Continue straight — look for shelter signs
+   * Arrive at [shelter name]
+   * Enter immediately and go as deep underground as possible
+   * Move to the lowest level — N levels underground
+   * Stay away from windows and outer walls (highlighted red)
+   * Wait for official all-clear before leaving
+
+
+Tab 2 — Threat
+* Blast zone legend (mirrors map legend): Fireball / Heavy Blast / Light Blast
+* Fallout drift direction indicator
+* User's zone classification (e.g. 'You are in the Light Blast Zone')
+
+
+Tab 3 — Evacuate
+* Crosswind evacuation route rendered on map (green polyline)
+* Direction card: bearing + road name suggestion
+* Note: avoid downwind corridor
+
+
+4.4 Map Legend (always visible, top-right)
+Floating legend panel, always visible regardless of sidebar state.
+Legend Section
+	Items
+	Zones
+	Fireball Zone (red) | Heavy Blast Zone (orange) | Light Blast Zone (yellow)
+	Lines
+	Fallout drift (purple dashed) | Escape route (cyan solid) | Walk to shelter (blue dashed)
+	Markers
+	Your location (blue dot)
+	Shelters
+	Subway | Hospital | Parking | Building
+	
+
+4.5 How-To Card (bottom-left overlay)
+Persistent instruction card visible until Analyze is clicked. Dark semi-transparent background.
+* Step 1: Click 'Place Blast' to mark where the bomb drops
+* Step 2: Enter your address or click GPS
+* Step 3: Hit 'Analyze' to see your escape route
+* Try: hint text with example addresses (Times Square, Wall Street, 10001)
+
+
+5. Module Specifications [UPDATED]
+5.1 blast.ts — Yield Selector + Place Blast Mode [NEW]
+Handles the yield preset toggle and the map click-to-place-epicenter interaction. This module did not exist in v1/v2.
+
+
+// src/blast.ts
+let placingBlast = false;
+
+
+export function enablePlaceBlastMode(map: L.Map, onSet: (latlng: L.LatLng) => void) {
+  placingBlast = true;
+  map.getContainer().style.cursor = 'crosshair';
+  map.once('click', (e) => {
+    placingBlast = false;
+    map.getContainer().style.cursor = '';
+    onSet(e.latlng);
+    showBanner('Blast center set — now enter your location');
+  });
+}
+
+
+export function getRadiiForYield(preset: YieldPreset) {
+  return BLAST_RADII[preset];
+}
+
+
+
+
+5.2 gps.ts — GPS + Address Geocoding [UPDATED]
+Now handles both GPS acquisition and free-text address geocoding via Nominatim (OSM geocoder, no API key required).
+
+
+// Nominatim geocoding — free, no key needed
+export async function geocodeAddress(query: string): Promise<UserPosition> {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+  const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+  const data = await res.json();
+  if (!data.length) throw new Error('Address not found');
+  return {
+    lat: parseFloat(data[0].lat),
+    lng: parseFloat(data[0].lon),
+    label: data[0].display_name
+  };
+}
+
+
+export async function getUserPosition(): Promise<UserPosition> {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => resolve({ lat: coords.latitude, lng: coords.longitude }),
+      (err) => reject(err),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  });
+}
+
+
+Nominatim usage policy: max 1 request/second, must include a valid User-Agent header. For a hackathon this is fine. Add 'User-Agent': 'NuclearForce/1.0' to all fetch headers.
+
+
+5.3 shelters.ts — Nearest Shelter Engine
+
+
+import * as turf from '@turf/turf';
+import shelterData from './data/shelters.geojson';
+
+
+export function getNearestShelter(userPos: UserPosition) {
+  const userPt = turf.point([userPos.lng, userPos.lat]);
+  return turf.nearestPoint(userPt, shelterData as any);
+}
+
+
+export function getDistanceMeters(userPos: UserPosition, shelter: any): number {
+  const from = turf.point([userPos.lng, userPos.lat]);
+  const to   = turf.point(shelter.geometry.coordinates);
+  return Math.round(turf.distance(from, to, { units: 'meters' }));
+}
+
+
+export function getWalkingTimeMin(distanceM: number): number {
+  return Math.ceil((distanceM / 1000 / 5) * 60); // 5 km/h
+}
+
+
+
+
+5.4 threat.ts — Blast Radius + Fallout Engine
+
+
+export function drawBlastZones(map: L.Map, config: BlastConfig): L.LayerGroup {
+  const radii = BLAST_RADII[config.yieldPreset];
+  const epi   = turf.point([config.epicenterLng, config.epicenterLat]);
+  const group = L.layerGroup();
+  const zones = [
+    { r: radii.lightBlast,  color: '#F1C40F', label: 'Light Blast'  },
+    { r: radii.heavyBlast,  color: '#E67E22', label: 'Heavy Blast'  },
+    { r: radii.fireball,    color: '#E74C3C', label: 'Fireball'     },
+  ];
+  zones.forEach(z => {
+    L.geoJSON(turf.circle(epi, z.r, { units:'kilometers' }), {
+      style: { color: z.color, fillColor: z.color, fillOpacity: 0.25, weight: 2 }
+    }).addTo(group);
+  });
+  return group.addTo(map);
+}
+
+
+export function drawFalloutPlume(map: L.Map, config: BlastConfig): L.Polygon {
+  const epi   = turf.point([config.epicenterLng, config.epicenterLat]);
+  const tip   = turf.destination(epi, 18, config.windBearing, { units:'kilometers' });
+  const left  = turf.destination(epi, 4,  config.windBearing + 90, { units:'kilometers' });
+  const right = turf.destination(epi, 4,  config.windBearing - 90, { units:'kilometers' });
+  return L.polygon(
+    [left, tip, right].map(p => [p.geometry.coordinates[1], p.geometry.coordinates[0]] as [number,number]),
+    { color:'#8E44AD', fillColor:'#8E44AD', fillOpacity:0.18, weight:1.5, dashArray:'6,4' }
+  ).addTo(map);
+}
+
+
+
+
+5.5 directions.ts — Walking Directions List [NEW]
+Renders the 7-step walking directions in the sidebar. Steps are semi-dynamic: step 3 and step 5 interpolate the shelter name and depth level.
+
+
+export function renderWalkingDirections(
+  shelter: ShelterFeature,
+  container: HTMLElement
+): void {
+  const steps = [
+    'Head west on the nearest street',
+    'Continue straight — look for shelter signs',
+    `Arrive at ${shelter.properties.name}`,
+    'Enter immediately and go as deep underground as possible',
+    `Move to the lowest level — ${shelter.properties.depthLevels} levels underground`,
+    'Stay away from windows and outer walls',   // rendered in red
+    'Wait for official all-clear before leaving',
+  ];
+  container.innerHTML = steps
+    .map((s, i) => `<li class='${i===5 ? "danger" : ""}'>${s}</li>`)
+    .join('');
+}
+
+
+
+
+6. Map Configuration [UPDATED]
+6.1 Tile Layer
+The live build uses OpenStreetMap standard tiles — not Mapbox dark tiles. This avoids needing a Mapbox token and is fully free with no registration.
+
+
+export function initMap(containerId: string): L.Map {
+  const map = L.map(containerId, {
+    center: [40.7128, -74.0060],  // NYC
+    zoom: 11,
+    zoomControl: true,
+  });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+  return map;
+}
+
+
+Zoom level 11 (vs 13 in v1 spec) gives a wider city view — important so users can see blast zones for 100kt and 1mt yields which extend far beyond Manhattan.
+
+
+7. Responsive Layout [UPDATED]
+The live build is desktop-first with a right sidebar panel. Mobile layout collapses the sidebar to a bottom drawer. This is the opposite order from the original spec (which was mobile-first with a bottom tab bar).
+
+
+7.1 Required HTML Head
+
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a2e">
+
+
+
+
+7.2 Desktop Layout (≥ 768px) — Primary
+
+
+#app { display: flex; flex-direction: column; height: 100dvh; }
+#navbar { height: 56px; flex-shrink: 0; background: #1a1a2e; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+#main  { flex: 1; display: flex; overflow: hidden; }
+#map-container { flex: 1; position: relative; }
+#map   { width: 100%; height: 100%; }
+#sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  transform: translateX(100%);      /* hidden until Analyze clicked */
+  transition: transform 0.25s ease;
+}
+#sidebar.open { transform: translateX(0); }
+
+
+
+
+7.3 Mobile Layout (< 768px)
+
+
+@media (max-width: 767px) {
+  #navbar { flex-wrap: wrap; height: auto; padding: 8px; gap: 6px; }
+  .yield-btn { font-size: 11px; padding: 4px 8px; }
+  #address-input { width: 100%; order: 10; }   /* wraps to second row */
+
+
+  #main { flex-direction: column; }
+
+
+  #sidebar {
+    width: 100%;
+    height: 50vh;
+    border-left: none;
+    border-top: 2px solid #E8B84B;
+    transform: translateY(100%);    /* slides up from bottom */
+  }
+  #sidebar.open { transform: translateY(0); }
+
+
+  .tab-bar { flex-direction: row; }  /* tabs stay horizontal */
+  .tab-item { min-height: 44px; }    /* Apple HIG touch target */
+}
+
+
+
+
+7.4 Breakpoint Summary
+Breakpoint
+	Layout
+	Sidebar
+	Navbar
+	≥ 768px (desktop)
+	Navbar top + map + right sidebar
+	300px right panel, slides in
+	Single row, full controls
+	< 768px (mobile)
+	Navbar top + map + bottom drawer
+	Full-width bottom sheet (50vh), slides up
+	Two rows: controls wrap
+	
+
+8. Environment & Deployment [UPDATED]
+8.1 Platform: Replit (as built)
+The live build runs on Replit, not Vercel. Both work. Replit is simpler for a hackathon since it has an in-browser IDE + preview.
+Variable
+	Required
+	Description
+	No env vars required
+	—
+	OSM tiles and Nominatim geocoding are both free with no API key. The app runs with zero configuration.
+	MAPBOX_TOKEN (optional)
+	No
+	If added, can swap OSM tiles for Mapbox dark tiles for a better visual aesthetic.
+	
+
+8.2 Deploy on Replit
+
+
+# In Replit Shell:
+npm install
+npm run dev      # starts Vite dev server on Replit's preview URL
+
+
+# To deploy publicly:
+# Click 'Publish' button in Replit UI → gets a .replit.dev URL
+# That URL is HTTPS — GPS works immediately
+
+
+8.3 Deploy on Vercel (alternative)
+
+
+npm create vite@latest nuclear-force -- --template vanilla-ts
+npm install leaflet @turf/turf
+npm install -D @types/leaflet
+vercel --yes
+git push origin main   # auto-deploys
+
+
+
+
+9. Performance & Constraints
+Constraint
+	Target
+	Approach
+	Time to analysis render
+	< 2 seconds
+	All calcs are synchronous JS after Analyze click. Geocoding is the only async step (Nominatim).
+	Nominatim rate limit
+	1 req/sec max
+	One geocode call per Analyze click. Add debounce if address input gets autocomplete.
+	Bundle size
+	< 500kb gzipped
+	Leaflet ~140kb. Turf.js — import only used modules to avoid full 1.5mb bundle.
+	GPS timeout
+	8 seconds max
+	Fallback to manual address entry. GPS button shows spinner during acquisition.
+	Mobile performance
+	Smooth pan/zoom
+	Keep blast zone layers in a single L.layerGroup. Remove previous layers before re-drawing on yield change.
+	
+
+10. Known Limitations (Post-Hackathon Backlog)
+Limitation
+	Impact
+	Fix
+	Walking directions are static (7 hardcoded steps)
+	Not turn-by-turn, ignores real streets
+	Integrate Mapbox Directions or OSRM routing API
+	Blast epicenter is manual (tap to place)
+	No real-event auto-location
+	Hook into USGS/FEMA alert feeds
+	Wind direction is a fixed default (SW)
+	Fallout plume not real-time
+	Integrate Open-Meteo free wind API (no key needed)
+	Shelter data is hardcoded GeoJSON (NYC only)
+	No other cities
+	Query OSM Overpass API dynamically by bounding box
+	Nominatim geocoding can be slow (~500ms)
+	Address resolution latency
+	Add local caching or swap for Photon geocoder
+	No offline/PWA support
+	Requires network for tiles
+	Add Workbox service worker + tile caching
+	
+
+11. Build Status Checklist [UPDATED]
+Component
+	Status
+	Notes
+	Leaflet map init + OSM tiles
+	Done
+	Deployed on Replit
+	GPS button + geolocation
+	Done
+	src/gps.ts
+	Address input + Nominatim geocoding
+	Done
+	src/gps.ts
+	Yield selector (4 presets)
+	Done
+	src/blast.ts — key addition vs v1
+	Place Blast click-to-set-epicenter
+	Done
+	src/blast.ts — key addition vs v1
+	Analyze button wires all modules
+	Done
+	src/main.ts
+	Blast radius circles (3 zones)
+	Done
+	src/threat.ts
+	Fallout plume (dashed polygon)
+	Done
+	src/threat.ts
+	Nearest shelter lookup (Turf)
+	Done
+	src/shelters.ts
+	Right sidebar panel (3 tabs)
+	Done
+	src/sidebar.ts — replaces bottom tab bar
+	Shelter card (name, address, stats)
+	Done
+	src/routing.ts
+	Walking directions (7 steps)
+	Done
+	src/directions.ts — new module
+	Map legend (top-right panel)
+	Done
+	src/ui.ts
+	How-to card (bottom-left overlay)
+	Done
+	src/ui.ts
+	Escape route + walk-to-shelter lines
+	Done
+	src/routing.ts
+	Evacuate tab (crosswind route)
+	Pending
+	src/evacuate.ts
+	Mobile responsive (bottom drawer)
+	Pending
+	styles/main.css breakpoint
+	Threat tab details
+	Pending
+	Zone classification for user position
